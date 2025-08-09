@@ -44,3 +44,5 @@ neuroscope_xml_creator(fullfile(session_path,'continuous','Acquisition_Board-100
 % a(a>550)=[];
 % figure;
 % hist(a,40);
+% vis the detected pulses
+% figure; plot(test); hold on; plot(both,1,'xr')
