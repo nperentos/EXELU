@@ -53,7 +53,7 @@ parameters.neuroscope.spikes.nSamples='32';
 parameters.neuroscope.spikes.peakSampleIndex='16';
 clrs = {'#0080ff','#ffea00'};
 for k=0:(nChannels-1)
-    clr = clrs{grpsz(k+1)};
+     
     parameters.neuroscope.channels.channelColors{k+1}.channel=num2str(k);
     parameters.neuroscope.channels.channelColors{k+1}.color=clr;
     parameters.neuroscope.channels.channelColors{k+1}.anatomyColor=clr;

@@ -29,7 +29,7 @@ timestamps = readNPY(timestamps_pth);
 
 % make an xml for neuroscope
 cd(pth)
-%neuroscope_xml_creator_EXELU(fileBase, sample_rate, num_channels,1000); % the standard one
+%neuroscope_xml_creator(fileBase, sample_rate, num_channels,1000); % the standard one
 neuroscope_xml_creator_EXELU(fileBase, sample_rate, num_channels,1000,channels_description);% the EXELU specific one
 
 % % hard link to the bin file at the filebase 
@@ -66,6 +66,7 @@ for i = 1:size(ADCs,1)
 end
 analog_ch_names = {'static','flashing','reversing','encoder'};
 
+save('analog_events.mat','analogEvents','analog_ch_names');
 
 
 % spikesorting
