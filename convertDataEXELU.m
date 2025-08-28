@@ -1,6 +1,5 @@
-function [outputArg1,outputArg2] = convertDataEXELU(fileBase,basepath)
-% Create LFP and dat files
-%   Detailed explanation goes here
+function [] = convertDataEXELU(fileBase,basepath)
+%% PRE
 if nargin < 2
     basepath = 'C:\Users\MDRTC5707A\Documents\Open Ephys\';
 end
@@ -11,6 +10,39 @@ if ~exist(pth, 'dir') == 7
     error('recording folder not found. Please check');
 end
 
+%% RAW DATA BACKUP
+% first, backup the original onto an external SSD EXELU_SSD2 for example
+% Check for external drive named 'EXELU'
+[~, result] = system('wmic logicaldisk get VolumeName,DeviceID');
+
+% Look for the line containing 'EXELU'
+driveLetter = '';
+lines = strsplit(result, newline);
+for i = 1:length(lines)
+    if contains(lines{i}, 'EXELU_SSD2')
+        parts = strsplit(strtrim(lines{i}));
+        driveLetter = parts{1}; % e.g. 'E:'
+        break;
+    end
+end
+
+% Use the result
+if ~isempty(driveLetter)
+    externalPath = [driveLetter '\']; % e.g. 'E:\'
+    fprintf('External EXELU_SSD2 found at %s\n', externalPath);
+    sourceFolder = pth;
+    destinationFolder = fullfile(externalPath, fileBase);
+    if ~exist(destinationFolder, 'dir')
+        copyfile(sourceFolder, destinationFolder);
+        disp('Folder copied successfully.');
+    else
+        disp('Folder already exists on external SSD.');
+    end
+else
+    disp('External SSD EXELU not found.');
+end
+
+%% Create LFP and dat files
 % load metadata
 xml_pth = fullfile(pth,'Record Node 102','experiment1','recording1','structure.oebin');  
 %  assuming the folder structure wont change!
@@ -40,7 +72,8 @@ target = fullfile(pth,'Record Node 102\experiment1\recording1\continuous\Acquisi
 cmd = sprintf('fsutil hardlink create "%s" "%s"',link,target);
 [status,result] = system(cmd);
 % for now we avoid making a new dat file with bit2volts taken into account
-% as there is a possibility ot accuracy loss. We just need to remember in
+% as there is a possibility ot accuracy loss (unless we use float32 which will increase file sizes substantially
+% . We just need to remember in
 % later stages to do the bit to volt conversions
 
 % make .lfp
@@ -66,10 +99,16 @@ for i = 1:size(ADCs,1)
 end
 analog_ch_names = {'static','flashing','reversing','encoder'};
 
-save('analog_events.mat','analogEvents','analog_ch_names');
+% get any user text messages 
+pth_txt_msg = fullfile(basepath,fileBase,'Record Node 102\experiment1\recording1\events\MessageCenter');
+ts_user_msgs = readNPY(fullfile(pth_txt_msg,'timestamps.npy'));
+user_msgs = readOpenEphysText(fullfile(pth_txt_msg,'text.npy')); % doesnt work
+
+save('analog_events.mat','analogEvents','analog_ch_names','user_msgs','ts_user_msgs');
 
 
-% spikesorting
+%% SPIKESORTING
+
 % make a map file specific to H3(64) + EEG(6) + ADC(5)
 ephys_chs = find([channels_description.type]==0);
 Nchannels = num_channels;%length(ephys_chs);
@@ -81,18 +120,98 @@ ycoords = (0:20:(20*(Nchannels-1)))';
 kcoords = zeros(Nchannels,1);
 fs = sample_rate;
 save([fileBase,'.chanmap.mat'],'chanMap','connected','xcoords','ycoords','kcoords','fs');
-% figure;
-% scatter(xcoords,ycoords,[],connected);
-% set(gca, 'YDir','reverse');
+% figure; % scatter(xcoords,ycoords,[],connected); % set(gca, 'YDir','reverse');
 
-% % we postpone trying to run KS from matlab for now 
-% % invoke the KS py env and spike sort with default vars
-% %pyenv('Version','C:\Users\MDRTC5707A\anaconda3\envs\kilosort\python.exe'); % run only once to set matlab default python
-% py.print("hello from KS env!");
-% py.runpy.run_path('C:\Users\MDRTC5707A\Documents\MATLAB\KSpy\KSpy.py');
+%vconfigure python for kilosort
+py_exe = 'C:\Users\MDRTC5707A\anaconda3\envs\kilosort\python.exe'; % Python inside the conda env
+script = 'C:\Users\MDRTC5707A\Documents\MATLAB\KSpy\run_KS_wrapper_NP.py';
+SAVE_PATH = fullfile(pth,[fileBase,'.dat']);
+N_CHAN_BIN = num_channels;
+MAP = fullfile(pth,[fileBase,'.chanmap.mat']);
+
+% === BUILD AND RUN COMMAND ===
+logFile = fullfile(pth,'kilosort_log.txt');
+
+cmd = sprintf('"%s" "%s" "%s" %d "%s"', py_exe, script, SAVE_PATH, N_CHAN_BIN, MAP);
+%status = system(cmd);
+status = system([cmd ' > "' logFile '" 2>&1']);
+
+if status == 0
+    disp('Kilosort completed successfully.');
+else
+    warning('ks algo script exited with error code %d.', status);
+end
 
 
-outputArg1 = 0;
-outputArg2 = 0;
+script2 = 'C:\Users\MDRTC5707A\Documents\MATLAB\KSpy\generate_KS_report.py';
+command = sprintf('"%s" "%s" "%s"', py_exe, script2, SAVE_PATH);
+status = system(command);
+if status == 0
+    disp('Kilosort report generated successfully.');
+else
+    warning('ks report script exited with error code %d.', status);
+end
+
+%% POST
+% once everything is finished,copy the processed data to EXELU_SSD1
+% (without the original OE files)
+% Check for external drive named 'EXELU'
+[~, result] = system('wmic logicaldisk get VolumeName,DeviceID');
+
+% Look for the line containing 'EXELU'
+driveLetter = '';
+lines = strsplit(result, newline);
+for i = 1:length(lines)
+    if contains(lines{i}, 'EXELU_SSD1')
+        parts = strsplit(strtrim(lines{i}));
+        driveLetter = parts{1}; % e.g. 'E:'
+        break;
+    end
+end
+
+% Use the result
+if ~isempty(driveLetter)
+    externalPath = [driveLetter '\']; % e.g. 'E:\'
+    fprintf('External EXELU_SSD1 found at %s\n', externalPath);
+    sourceFolder = pth;
+    destinationFolder = fullfile(externalPath, fileBase);
+    excludeFolder  = 'Record Node 102';
+    if ~exist(destinationFolder, 'dir')
+        mkdir(destinationFolder);
+        items = dir(sourceFolder);
+        disp('copying please wait...');
+        for i = 1:length(items)
+            name = items(i).name;
+        
+            % Skip '.' and '..'
+            if strcmp(name, '.') || strcmp(name, '..')
+                continue;
+            end
+        
+            % Full paths
+            srcPath = fullfile(sourceFolder, name);
+            destPath = fullfile(destinationFolder, name);
+        
+            % Skip the excluded folder
+            if items(i).isdir && strcmp(name, excludeFolder)
+                fprintf('Skipping folder: %s\n', srcPath);
+                continue;
+            end
+        
+            % Copy files or folders
+            if items(i).isdir
+                copyfile(srcPath, destPath); % Copies entire folder recursively
+            else
+                copyfile(srcPath, destPath);
+            end
+
+        end
+        disp('Folder copied successfully.');
+    else
+        disp('Folder already exists on external SSD.');
+    end
+else
+    disp('External SSD_EXELU1 not found.');
+end
 
 end
