@@ -16,6 +16,10 @@ parameters.fieldPotentials.lfpSamplingRate = lfpSR;
 parameters.files.file.samplingRate = lfpSR;
 parameters.files.file.extension = 'lfp';
 
+% lets use mapping to define anatomical groups bit2volts colors etc
+
+
+
 if nargin>4 & ~isempty(mapping);
     switch mapping
         case 'Buzsaki64';
