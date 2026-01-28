@@ -10,6 +10,12 @@ function vars = loadParticulars(filename)
 %
 % Numeric values will be converted automatically. Text is kept as string.
 
+    if ~exist(filename, 'file')
+        fclose(fopen(filename, 'w'));   % create empty text file
+        vars = struct();
+        return
+    end
+
     % Read table, but don't attempt automatic type detection
     T = readtable(filename, ...
         'Delimiter', '=', ...
