@@ -11,21 +11,21 @@
 % add ripples to remove ripples
 
 
-if ispc 
-    addpath(genpath('C:\Users\npere\MATLAB'));
-elseif isunix
-    addpath(genpath('/home/nikolas/Documents/MATLAB'))
-else
-    error('cannot mount code folders -> please resolve...');
-end
+% if ispc 
+%     addpath(genpath('C:\Users\npere\MATLAB'));
+% elseif isunix
+%     addpath(genpath('/home/nikolas/Documents/MATLAB'))
+% else
+%     error('cannot mount code folders -> please resolve...');
+% end
 
-p = findUsbDiskMountPath("EXELU_SSD1");
+p = fullfile(getenv('HOME'),'Local Data','EXELU');
 
-if p == ""
-    disp("EXELU_SSD1 not found or not mounted.");
-else
-    fprintf("Data disk found at: %s\n", p);
-end
+% if p == ""
+%     disp("EXELU_SSD1 not found or not mounted.");
+% else
+%     fprintf("Data disk found at: %s\n", p);
+% end
 
 
 
@@ -145,7 +145,7 @@ end
 % running speed
     runPulses = analogEvents{1,5}./30e3;
     bins = 0:movingwin(1):max(runPulses)+0.1;
-    cnts = histcounts(runPulses,bins).*20*pi*9/600; % cm/s
+    cnts = histcounts(runPulses,bins).*40*pi*9/600; % cm/s
     speed_tmp = smooth(cnts,10); 
     speed = interp1(bins(2:end),speed_tmp,t, 'nearest');
     figure; 
@@ -156,7 +156,7 @@ end
 
 
 % lets use the mt triggered spectrogram instead
-nCh = size(x,2);
+nCh = size(x,1);
 % trigs must be in seconds 
 test = analogEvents{1,1}./30e3; % events in seconds
 test = reshape(test,2,[]);
@@ -170,14 +170,14 @@ params.pad    = 1;        % No additional frequency padding
 
 % compute triggered spectrograms
 for ch = 1:nCh
-    [S{ch}, t, f] = mtspecgramtrigc(x(:,ch), trigs, twin, movingwin, params);
+    [S{ch}, t, f] = mtspecgramtrigc(x(ch,:), trigs, twin, movingwin, params);
     % S is in: t x f x tr
-    bsl_mask = (t>=0) & (t<5);
+    bsl_mask = (t>=4) & (t<5); % t >= 4.5 & t < 5
     dur_mask = (t>5);
     % get averages of bsl ts and dur ts. maintain trials
-    S_bsl{ch} = sq(mean(S{ch}(bsl_mask,:,:),1));% average of epochs, not trials
-    S_dur{ch} = sq(mean(S{ch}(dur_mask,:,:),1));% average of epochs, not trials
-    S_diff{ch} = S_dur{ch}-S_bsl{ch};% baselinecorrected trials
+    S_bsl{ch} = sq(mean(S{ch}(bsl_mask,:,:),1)); % average of epochs, not trials
+    S_dur{ch} = sq(mean(S{ch}(dur_mask,:,:),1)); % average of epochs, not trials
+    S_diff{ch} = S_dur{ch}-S_bsl{ch}; % baselinecorrected trials
     S_mu{ch} = mean(S_diff{ch},2); % mean across trials
     S_sem{ch} = std(S_diff{ch},0,2)./sqrt(length(trigs));% std across trials
 end
