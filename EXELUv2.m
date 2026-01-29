@@ -73,7 +73,6 @@ triggers = events(:,1) ./ fs; % trial onsets (seconds)
 
 % clean triggers to ensure enough data for pre and post windows
 triggers = filterValidTriggers(triggers, tWin, duration);
-triggers = triggers(valid);
 
 % parameters for multitaper spectral estimation
 movingWin = [0.2 0.2*0.2]; % 200 ms window, 20% step size
