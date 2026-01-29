@@ -5,15 +5,19 @@ function badChans = badChannels(session, fs, segmentDuration, W)
 % Inputs:
 %    session - An LFP session structure containing channel data.
 %    fs      - Sampling frequency of the LFP data.
-%    segmentDuration - Duration (in ms) of the segment to analyze for bad channels.
+%    segmentDuration - Duration (in seconds) of the segment to analyze for bad channels.
 %    W       - Window size for local z-score computation (default: 5).
 % Outputs:          
 %    badChans - A vector of channel indices identified as bad.
 
-if nargin < 2
+if nargin < 2 || isempty(fs)
     fs = session.settings.parameters.fieldPotentials.lfpSamplingRate;
-    segmentDuration = 100; % ms
-    W = 5; % default window size for local z-score computation
+end
+if nargin < 3 || isempty(segmentDuration)
+    segmentDuration = 0.1; 
+end
+if nargin < 4 || isempty(W)
+    W = 5;
 end
 
 % select samples in first segmentDuration and normalize by median
@@ -44,7 +48,7 @@ end
 bad_corr_idx = z_local_corr < -3; % threshold at z < -3
 
 % compute segment PSD for each channel
-movingwindow = [1.5 1.5*0.2]; % 1.5 ms window, 20% overlap
+movingwindow = [0.2 0.04]; % 200 ms window, 20% step size
 params.tapers = [2 3] ; % time-bandwidth product 2, 3 tapers
 params.Fs = fs;
 params.fpass = [0 200]; % frequency range 0-200 Hz
