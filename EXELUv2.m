@@ -31,97 +31,98 @@ fs = str2double(session.settings.parameters.fieldPotentials.lfpSamplingRate.Text
 
 
 
-%% 2. Compute particulars files for each session
-
-% identify bad channels
-segmentDuration = 100; % ms
-badChans = badChannels(session, fs, segmentDuration);
+%% 2. Load particulars files for each session and/or compute bad channels if necessary
 
 % load existing particulars file and update bad channels if necessary
 particulars = loadParticulars(fullfile(basepath, sessions{idx}, 'session_particulars.txt'));
 
-if ~isfield(particulars, 'bad_channels') || ...
-        ~isequal(particulars.bad_channels, badChans)
+% compute bad channels if not already present
+if ~isfield(particulars,'bad_channels') || isempty(particulars.bad_channels)
+    segmentDuration = 0.1; % seconds
+    badChans = badChannels(session, fs, segmentDuration);
+    display(['Computed bad channels: ', mat2str(badChans)]);
     particulars.bad_channels = badChans;
-    fid = fopen(fullfile(basepath, sessions{idx}, 'session_particulars.txt'), 'a');
-    fprintf(fid, 'bad_channels= %s\n', strjoin(string(badChans), ' '));
-    fclose(fid);
+
+    if ~isempty(badChans)
+        fid = fopen(fullfile(basepath, sessions{idx}, 'session_particulars.txt'), 'a');
+        fprintf(fid, 'bad_channels= %s\n', strjoin(string(badChans), ' '));
+        fclose(fid);
+    end
 end
 
+session.qc.badChannels = str2double(split(particulars.bad_channels));
+session.qc.goodMask = true(size(session.data,1),1);
+session.qc.goodMask(session.qc.badChannels) = false;
+session.qc.badMask = ~session.qc.goodMask;
+
+data = session.data(session.qc.goodMask, :); % use only good channels
+tWin = [5 10]; % [pre post] seconds
+duration = size(data, 2) / fs;
 
 
-%% 3. Extract chunks for each condition
-% condition 1: Static Grating (on and off samples)
-% condition 2: Phase Reversing Grating @ 40 Hz (sample at which frame one turns on and off—starts with white)
-% condition 3: Full Screen Flickering @ 40 Hz (sample full screen flickers on then off)
-% condition 4: Phase Reversing Grating @ 40 Hz (sample at which frame two turns on and off —starts with black)
-% condition 5: Running speed (sample at which pulse triggered; 600 pulses per rotation)
+
+%% 3.1 Extract chunks for condition 1
+% Static Grating (on and off samples)
 
 condition = 1;
 
-nCh = size(session.data, 1);
-duration = size(session.data, 2) / fs; 
+% extract triggers
+events = session.events.analogEvents{1, condition};
+events = reshape(events, 2, [])'; % [start end] per trial
+triggers = events(:,1) ./ fs; % trial onsets (seconds)
 
-events = session.events.analogEvents{1, condition}; % convert to seconds
-events = reshape(events, 2, []); % each row is [start, end] of event
-triggers = events(1, :)./30e3; % take start times as triggers IN SECONDS
+% clean triggers to ensure enough data for pre and post windows
+triggers = filterValidTriggers(triggers, tWin, duration);
+triggers = triggers(valid);
 
-tWin = [5, 10]; % time window around event in seconds [pre, post]
-movingWin = [0.2 0.2*0.2]; % moving window for chunking [window size, step size] in seconds
+% parameters for multitaper spectral estimation
+movingWin = [0.2 0.2*0.2]; % 200 ms window, 20% step size
+params = struct();
+params.tapers = [2 3];
+params.Fs     = fs;
+params.fpass  = [10 200];
+params.pad    = 1;
 
-valid = triggers + tWin(2) <= duration; % ensure triggers fit within data duration
-triggers = triggers(valid); 
+% compute triggered spectra
+spec = computeTriggeredSpectra( ...
+    data, fs, triggers, tWin, movingWin, params);
 
-% parameters for PSD computation
-params.tapers = [2 3]; % time-bandwidth product 3, 5 tapers
-params.Fs = fs;
-params.fpass = [10 200]; % frequency range
-params.pad = 1 ; % padding
-
-% preallocate cell containers (good hygiene)
-S      = cell(nCh,1);
-S_bsl  = cell(nCh,1);
-S_trig = cell(nCh,1);
-S_diff = cell(nCh,1);
-S_mu   = cell(nCh,1);
-S_sem  = cell(nCh,1);
-
-for ch = 1:nCh
-    
-    [S{ch}, t, f] = mtspecgramtrigc(session.data(ch, :), triggers, tWin, movingWin, params);
-
-    % S is in dimensions: times x frequencies x trials
-
-    baseline_mask = (t>=4.5 & t<5); % baseline period before event
-    triggered_mask = (t>5); % period after event
-
-    S_bsl{ch} = sq(mean(S{ch}(baseline_mask, :, :), 1)); % average over baseline time
-    S_trig{ch} = sq(mean(S{ch}(triggered_mask, :, :), 1)); % average over triggered time
-    S_diff{ch} = S_trig{ch} - S_bsl{ch}; % difference between triggered and baseline
-    S_mu{ch} = sq(mean(S_diff{ch}, 2)); % mean over trials
-    S_sem{ch} = sq(std(S_diff{ch}, 0, 2)) ./ sqrt(size(S{ch}, 3)); % SEM over trials
-
-end
-
-nF = size(S_mu{1}, 1);
-
-S_mu_all  = zeros(nF, nCh);
-S_sem_all = zeros(nF, nCh);
-
-for ch = 1:nCh
-    S_mu_all(:, ch)  = S_mu{ch};
-    S_sem_all(:, ch) = S_sem{ch};
-end
-
-session.responses.spectra{condition} = struct(...
-    'S_mu', S_mu_all, ...
-    'S_sem', S_sem_all, ...
-    'f', f ...
-);
+session.responses.spectra{condition} = spec;
 
 
 
-%% 4. Superimpose spectrum over channels for a single condition
+%% 3.2 Extract chunks for condition 2
+% Full Screen Flickering @ 40 Hz (sample full screen flickers on then off)
+
+condition = 2;
+pulses = session.events.analogEvents{1, condition} ./ fs;
+gapThresh = 5; % seconds
+triggers = extractTrialTriggers(pulses, gapThresh);
+triggers = filterValidTriggers(triggers, tWin, duration);
+
+spec = computeTriggeredSpectra( ...
+    data, fs, triggers, tWin, movingWin, params);
+
+session.responses.spectra{condition} = spec;
+
+%% 3.3 Extract chunks for condition 3
+% Phase Reversing Grating @ 40 Hz (sample at which frame one turns on and off—starts with white)
+
+condition = 3;
+
+% trigger extraction (implicit trials via pulse gaps) 
+pulses = session.events.analogEvents{1, condition} ./ fs;  % seconds
+gapThresh = 5;  % seconds
+triggers = extractTrialTriggers(pulses, gapThresh);
+triggers = filterValidTriggers(triggers, tWin, duration);
+
+%spectra computation (generalised, unchanged) ----
+spec = computeTriggeredSpectra( ...
+    data, fs, triggers, tWin, movingWin, params);
+
+session.responses.spectra{condition} = spec;
+
+%% 4. Plot spectra for across conditions
 
 S = session.responses.spectra{condition}.S_mu;   % freq × channel
 f = session.responses.spectra{condition}.f;
@@ -157,3 +158,9 @@ cb.TickLabels = {'Deep', 'Superficial'};
 
 box off
 grid on
+
+
+
+% condition 3: Full Screen Flickering @ 40 Hz (sample full screen flickers on then off)
+% condition 4: Phase Reversing Grating @ 40 Hz (sample at which frame two turns on and off —starts with black)
+% condition 5: Running speed (sample at which pulse triggered; 600 pulses per rotation)
