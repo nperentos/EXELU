@@ -1,16 +1,19 @@
 
-function badChans = badChannels(session, fs, segmentDuration)
+function badChans = badChannels(session, fs, segmentDuration, W)
 % badChannels - Identify bad channels in an LFP session based on signal quality.
 % Syntax: badChans = badChannels(session)
 % Inputs:
 %    session - An LFP session structure containing channel data.
 %    fs      - Sampling frequency of the LFP data.
+%    segmentDuration - Duration (in ms) of the segment to analyze for bad channels.
+%    W       - Window size for local z-score computation (default: 5).
 % Outputs:          
 %    badChans - A vector of channel indices identified as bad.
 
 if nargin < 2
-    fs = session.settings.parameters.acquisitionSystem.samplingRate;
+    fs = session.settings.parameters.fieldPotentials.lfpSamplingRate;
     segmentDuration = 100; % ms
+    W = 5; % default window size for local z-score computation
 end
 
 % select samples in first segmentDuration and normalize by median
@@ -25,11 +28,20 @@ for i = 1:C-1
     rho(i) = r;
 end
 
-% compute score for each channel based on correlation with neighbors
+% compute z-score for each channel based on correlation with neighbors
 score = nan(C, 1);
 score(2:C-1) = (rho(1:end-1) + rho(2:end))/2;
-z = (score - median(score, 'omitnan')) / 1.4826*mad(score, 1);
-badChans = find(z < -3); % threshold at z < -3
+
+% local z-score (within groups of ±W channels)
+z_local_corr = nan(size(score)); 
+for ch = 1:numel(score)
+    lo = max(1, ch-W); % lower bound
+    hi = min(numel(score), ch+W); % upper bound
+    local = score(lo:hi); 
+    z_local_corr(ch) = (score(ch) - median(local,'omitnan')) / (1.4826 * mad(local,1));
+end
+
+bad_corr_idx = z_local_corr < -3; % threshold at z < -3
 
 % compute segment PSD for each channel
 movingwindow = [1.5 1.5*0.2]; % 1.5 ms window, 20% overlap
@@ -47,11 +59,17 @@ lineBand = f_seg >= lineHz - bw & f_seg <= lineHz + bw;
 linePower = sum(S_seg_mean(lineBand, :), 1);
 lfpBand = f_seg > 1 & f_seg < 200 & ~lineBand;
 lfpPower = sum(S_seg_mean(lfpBand, :), 1);
-lineRatio = linePower ./ lfpPower;
+lineRatio = (linePower ./ lfpPower)';
+
+% compute z-score for line noise ratio
+z_line = (lineRatio - median(lineRatio)) / (1.4826*mad(lineRatio, 1));
+bad_line_idx = z_line > 3; % threshold at z > 3
 
 % combine metrics
-score = sqrt(max(z, 0)) .* max(zscore(lineRatio)', 0);
-badChans = find(score > 3); % threshold at score > 3
-disp(['Bad channels identified: ' mat2str(badChans)]);
+% score = sqrt(max(z, 0)) .* max(zscore(lineRatio)', 0);
+
+badChans = find(bad_corr_idx | bad_line_idx);
+
+fprintf('Bad channels identified: %s\n', mat2str(badChans));
 end
 
