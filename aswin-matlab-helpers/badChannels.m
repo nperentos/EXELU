@@ -1,4 +1,3 @@
-
 function badChans = badChannels(session, fs, segmentDuration, W)
 % badChannels - Identify bad channels in an LFP session based on signal quality.
 % Syntax: badChans = badChannels(session)

@@ -1,4 +1,4 @@
-function triggers = filterValidTriggers(triggers, tWin, duration)
+function validTriggers = filterValidTriggers(triggers, tWin, duration)
     valid = triggers + tWin(2) <= duration;
-    triggers = triggers(valid);
+    validTriggers = triggers(valid);
 end
